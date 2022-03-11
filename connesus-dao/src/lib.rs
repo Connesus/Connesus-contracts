@@ -1,67 +1,69 @@
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::collections::{LazyOption, LookupMap};
-use near_sdk::json_types::{U128, U64, ValidAccountId, Base64VecU8};
+use near_sdk::collections::{LookupMap};
+use near_sdk::json_types::{U128, U64, ValidAccountId};
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::{
     env, ext_contract, near_bindgen, AccountId, Balance, BorshStorageKey,
-    PanicOnDefault, PromiseOrValue, Gas
+    PanicOnDefault, PromiseOrValue, Gas, testing_env
 };
 use std::collections::HashMap;
 use near_contract_standards::fungible_token::core_impl::ext_fungible_token;
 use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
+
+near_sdk::setup_alloc!();
 
 pub use crate::proposals::*;
 pub use crate::types::*;
 pub use crate::views::*;
 pub use crate::types::*;
 pub use crate::donations::*;
-
+pub use crate::bounty::*;
+use crate::utils::*;
 
 mod delegation;
 mod proposals;
 mod types;
 pub mod views;
 mod donations;
+mod bounty;
+mod utils;
 
 #[derive(BorshStorageKey, BorshSerialize)]
 pub enum StorageKeys {
-    DaoMetadata,
     Delegations,
     Proposals,
     Donations,
-}
-
-/// After payouts, allows a callback
-#[ext_contract(ext_self)]
-pub trait ExtSelf {
-    /// Callback after proposal execution.
-    fn on_proposal_callback(&mut self, proposal_id: u64) -> PromiseOrValue<()>;
+    Bounties
 }
 
 #[near_bindgen]
 #[derive(BorshSerialize, BorshDeserialize, PanicOnDefault)]
 pub struct Contract {
-    /// DAO Metadata.
+    // DAO Metadata.
     pub dao_metadata: DaoMetadata,
-    /// Voting and permissions policy.
+    // Voting and permissions policy.
 
-    /// Amount of $NEAR locked for bonds.
+    // Amount of $NEAR locked for bonds.
     pub locked_amount: Balance,
 
-    /// Vote staking contract id. That contract must have this account as owner.
-    pub community_token_id: AccountId,
-    /// Delegated  token total amount.
+    // Vote staking contract id. That contract must have this account as owner.
+    pub token_account_id: OldAccountId,
+    // Delegated  token total amount.
     pub total_delegation_amount: Balance,
-    /// Delegations per user.
+    // Delegations per user.
     pub delegations: LookupMap<AccountId, Balance>,
-    /// Last available id for the proposals.
+    // Last available id for the proposals.
     pub last_proposal_id: u64,
-    /// Proposal map from ID to proposal information.
+    // Proposal map from ID to proposal information.
     pub proposals: LookupMap<u64, VersionedProposal>,
 
     pub donations: LookupMap<AccountId, Balance>,
 
-    pub owner_id: AccountId
+    pub owner_id: AccountId,
+
+    pub last_bounty_id: u64,
+
+    pub bounties: LookupMap<u64, VersionedBounty>,
 }
 
 #[near_bindgen]
@@ -71,22 +73,24 @@ impl Contract {
         let owner_id = env::predecessor_account_id();
         let this = Self {
             dao_metadata: metadata,
-            community_token_id: token_contract_id,
+            token_account_id: token_contract_id,
             total_delegation_amount: 0,
             delegations: LookupMap::new(StorageKeys::Delegations),
             last_proposal_id: 0,
             proposals: LookupMap::new(StorageKeys::Proposals),
             locked_amount: 0,
             donations: LookupMap::new(StorageKeys::Donations),
-            owner_id: owner_id
+            owner_id: owner_id,
+            last_bounty_id: 0,
+            bounties: LookupMap::new(StorageKeys::Bounties),
         };
         this
     }
 
-    /// Should only be called by this contract on migration.
-    /// This is NOOP implementation. KEEP IT if you haven't changed contract state.
-    /// If you have changed state, you need to implement migration from old state (keep the old struct with different name to deserialize it first).
-    /// After migrate goes live on MainNet, return this implementation for next updates.
+    // Should only be called by this contract on migration.
+    // This is NOOP implementation. KEEP IT if you haven't changed contract state.
+    // If you have changed state, you need to implement migration from old state (keep the old struct with different name to deserialize it first).
+    // After migrate goes live on MainNet, return this implementation for next updates.
     #[init(ignore_state)]
     pub fn migrate() -> Self {
         assert_eq!(
@@ -99,12 +103,24 @@ impl Contract {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[cfg_attr(not(target_arch = "wasm32"), derive(Clone, Debug))]
+#[serde(crate = "near_sdk::serde")]
+pub enum TransferPurpose {
+    Delegate,
+    OpenDonate,
+    ProposalDonate,
+    CreateBounty,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[cfg_attr(not(target_arch = "wasm32"), derive(Clone, Debug))]
 #[serde(crate = "near_sdk::serde")]
 pub struct TransferArgs {
     pub delegate: AccountId,
     pub proposal: Option<u64>,
-    pub transfer_type: u8 // 1 for delegate, 2 for open donate, 3 for proposal donate
+    pub transfer_type: TransferPurpose, // 1 for delegate, 2 for open donate, 3 for proposal donate,
+    pub bounty_input: Option<BountyInput>
 }
 
 /**
@@ -121,20 +137,20 @@ impl FungibleTokenReceiver for Contract {
         amount: U128,
         msg: String,
     ) -> PromiseOrValue<U128> {
-        assert_eq!(
-            self.community_token_id,
-            env::predecessor_account_id(),
-            "ERR_INVALID_TOKEN"
-        );
-        let TransferArgs { delegate, proposal, transfer_type } = near_sdk::serde_json::from_str(&msg).expect("Not valid DelegateArgs");
+        let TransferArgs { delegate, proposal, transfer_type, bounty_input } = near_sdk::serde_json::from_str(&msg).expect("Not valid DelegateArgs");
+        let token_account_id = self.token_account_id.clone();
         match transfer_type {
-            1 => {
+            TransferPurpose::Delegate => {
+                assert_account_id(&token_account_id);
                 self.internal_delegate(&delegate, amount);
+                self.locked_amount += amount.0;
             },
-            2 => {
+            TransferPurpose::OpenDonate => {
+                assert_account_id(&token_account_id);
                 self.open_donate(&sender_id.to_string(), amount);
             }, 
-            3 => {
+            TransferPurpose::ProposalDonate => {
+                assert_account_id(&token_account_id);
                 let proposal_id = proposal.expect("PROPOSAL_ID_NOT_PROVIDED");
                 let mut proposal_obj: Proposal = self.proposals.get(&proposal_id).expect("ERR_NO_PROPOSAL").into();
                 match proposal_obj.kind {
@@ -150,7 +166,11 @@ impl FungibleTokenReceiver for Contract {
                     
                 }
             },
-            _ => unreachable!()
+            TransferPurpose::CreateBounty => {
+                let bounty_unwrapped = bounty_input.expect("BOUNTY_INPUT_NOT_FOUND");
+                assert_account_id(&bounty_unwrapped.token);
+                self.create_bounty(bounty_unwrapped);
+            }
         }
         PromiseOrValue::Value(U128(0))
     }

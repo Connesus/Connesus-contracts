@@ -37,19 +37,15 @@ pub trait FungibleTokenContract {
 impl Contract {
     #[payable]
     pub fn register_delegation(&mut self, account_id: &AccountId) {
-        let community_token_id = self.community_token_id.clone();
-        assert_eq!(
-            env::predecessor_account_id(),
-            community_token_id,
-            "ERR_INVALID_CALLER"
-        );
+        let token_account_id = self.token_account_id.clone();
+        assert_account_id(&token_account_id);
         assert_eq!(env::attached_deposit(), 16 * env::storage_byte_cost());
         self.delegations.insert(account_id, &0);
     }
 
     
-    /// Removes given amount from given account's delegations.
-    /// Returns previous, new amount of this account and total delegated amount.
+    // Removes given amount from given account's delegations.
+    // Returns previous, new amount of this account and total delegated amount.
     pub fn withdraw(&mut self, amount: U128) {
         let account_id: AccountId = env::predecessor_account_id();
         self.internal_undelegate(&account_id, amount);
@@ -57,7 +53,7 @@ impl Contract {
             account_id.to_string(),
             amount,
             None,
-            &self.community_token_id,
+            &self.token_account_id,
             ONE_YOCTO_NEAR,
             GAS_FOR_FT_TRANSFER
         );
