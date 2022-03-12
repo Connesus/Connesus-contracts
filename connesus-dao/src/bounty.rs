@@ -2,7 +2,6 @@ use crate::*;
 
 // Bounty information.
 #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone)]
-#[cfg_attr(not(target_arch = "wasm32"), derive(Debug))]
 #[serde(crate = "near_sdk::serde")]
 pub struct Bounty {
     pub description: String,
@@ -14,8 +13,7 @@ pub struct Bounty {
     pub claimer: HashMap<AccountId, Balance>,
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
-#[cfg_attr(not(target_arch = "wasm32"), derive(Clone, Debug))]
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone)]
 #[serde(crate = "near_sdk::serde")]
 pub enum VersionedBounty {
     Default(Bounty),
@@ -31,7 +29,6 @@ impl From<VersionedBounty> for Bounty {
 
 
 #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
-#[cfg_attr(not(target_arch = "wasm32"), derive(Clone, Debug))]
 #[serde(crate = "near_sdk::serde")]
 pub struct BountyInput {
     pub description: String,

@@ -1,7 +1,6 @@
 use crate::*;
 
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
-#[cfg_attr(not(target_arch = "wasm32"), derive(Clone, Debug))]
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone)]
 #[serde(crate = "near_sdk::serde")]
 pub enum ProposalStatus {
     InProgress,
@@ -9,8 +8,7 @@ pub enum ProposalStatus {
 }
 
 // Kinds of proposals, doing different action.
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(not(target_arch = "wasm32"), derive(Clone, Debug))]
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, PartialEq, Clone)]
 #[serde(crate = "near_sdk::serde")]
 pub enum ProposalKind {
     Donate,
@@ -29,8 +27,7 @@ impl ProposalKind {
 }
 
 // Votes recorded in the proposal.
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(not(target_arch = "wasm32"), derive(Clone, Debug))]
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, PartialEq, Clone)]
 #[serde(crate = "near_sdk::serde")]
 pub enum VoteKind {
     // VoteByFunding,
@@ -38,7 +35,7 @@ pub enum VoteKind {
     MajorityVote
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug)]
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone)]
 #[serde(crate = "near_sdk::serde")]
 pub struct VoteOption {
     pub title: String,
@@ -54,15 +51,15 @@ impl From<VersionedProposal> for Proposal {
     }
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone)]
 #[serde(crate = "near_sdk::serde")]
 pub struct Vote {
-    option: String,
-    delegations: Balance
+    pub option: String,
+    pub delegations: Balance
 }
 
 // Proposal that are sent to this DAO.
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone)]
 #[serde(crate = "near_sdk::serde")]
 pub struct Proposal {
     // Original proposer.
@@ -88,7 +85,7 @@ pub struct Proposal {
     pub option_delegations: HashMap<String, Balance>
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone)]
 #[serde(crate = "near_sdk::serde")]
 pub enum VersionedProposal {
     Default(Proposal),
@@ -260,10 +257,10 @@ impl Contract {
             assert!(proposal_end_time_stamp > current_block_timestamp, "PROPOSAL_EXPIRED");
         }
         match action {
-            Action::Vote { option_id} => {
-                match &proposal.kind.clone() {
+            Action::Vote { option_id } => {
+                match &proposal.clone().kind {
                     ProposalKind::Vote { vote_kind } => {
-                        proposal.add_vote(&account_id, &option_id, user_delegate, vote_kind);
+                        proposal.add_vote(&account_id, &option_id, user_delegate, &vote_kind);
                     },
                     _ => unreachable!()
                 }

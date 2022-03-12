@@ -22,7 +22,7 @@ impl Contract {
 
     pub fn internal_reduce_delegation(&mut self, account_id: &AccountId, amount: U128) {
         let prev_amount = self.delegations.get(&account_id).unwrap_or_default();
-        assert!(prev_amount >= amount.0, "ERR_INVALID_STAKING_CONTRACT");
+        assert!(prev_amount >= amount.0, "ERR_NOT_ACCOUNT_NOT_ENOUGH_BALANCE");
         let new_amount = prev_amount - amount.0;
         self.delegations.insert(&account_id.to_string(), &new_amount);
     }
@@ -37,8 +37,8 @@ pub trait FungibleTokenContract {
 impl Contract {
     #[payable]
     pub fn register_delegation(&mut self, account_id: &AccountId) {
-        let token_account_id = self.token_account_id.clone();
-        assert_account_id(&token_account_id);
+        let token_account = self.token_account.clone();
+        assert_account_id(&token_account);
         assert_eq!(env::attached_deposit(), 16 * env::storage_byte_cost());
         self.delegations.insert(account_id, &0);
     }
@@ -53,7 +53,7 @@ impl Contract {
             account_id.to_string(),
             amount,
             None,
-            &self.token_account_id,
+            &self.token_account,
             ONE_YOCTO_NEAR,
             GAS_FOR_FT_TRANSFER
         );

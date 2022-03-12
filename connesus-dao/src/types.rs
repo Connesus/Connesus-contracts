@@ -14,8 +14,7 @@ pub const ONE_YOCTO_NEAR: Balance = 1;
 // Gas for single ft_transfer call.
 pub const GAS_FOR_FT_TRANSFER: Gas = 10_000_000_000_000;
 
-// Configuration of the DAO.
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Clone, Debug)]
+#[derive(BorshDeserialize, BorshSerialize, Clone, Deserialize, Serialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct DaoMetadata {
     // Name of the DAO.
@@ -25,6 +24,18 @@ pub struct DaoMetadata {
     // Generic metadata. Can be used by specific UI to store additional data.
     // This is not used by anything in the contract.
     pub thumbnail: String,
+
+    pub symbol: String,
+
+    pub facebook: Option<String>,
+
+    pub youtube: Option<String>,
+
+    pub twitter: Option<String>,
+
+    pub discord: Option<String>,
+
+    pub instagram: Option<String>,
 }
 
 #[cfg(test)]
@@ -40,9 +51,7 @@ impl DaoMetadata {
 
 // Set of possible action to take.
 #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, PartialEq)]
-#[cfg_attr(not(target_arch = "wasm32"), derive(Clone, Debug))]
 #[serde(crate = "near_sdk::serde")]
-
 pub enum Action {
     Vote {option_id: String},
     Finalize

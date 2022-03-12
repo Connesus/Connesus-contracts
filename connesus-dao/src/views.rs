@@ -57,6 +57,7 @@ pub struct ProposalOutput {
     pub id: u64,
     #[serde(flatten)]
     pub proposal: ProposalBaseInformation,
+    pub user_select: Vote,
 }
 
 
@@ -105,6 +106,9 @@ pub struct BountyOutput {
     pub bounty: BountyBaseInformation,
 }
 
+// This is format of output via JSON for the proposal.
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
 pub struct ProposalDonateAsObject {
     pub account: AccountId,
     pub doate_balance: Balance
@@ -124,8 +128,8 @@ impl Contract {
 
 
     // Returns staking contract if available. Otherwise returns empty.
-    pub fn token_account_id(self) -> String {
-        self.token_account_id
+    pub fn token_account(self) -> String {
+        self.token_account
     }
 
     // Returns locked amount of NEAR that is used for storage.
@@ -163,24 +167,51 @@ impl Contract {
     }
 
     // Get proposals in paginated view.
-    pub fn get_proposals(&self, from_index: u64, limit: u64) -> Vec<ProposalOutput> {
+    pub fn get_proposals(&self, from_index: u64, limit: u64, account_id: AccountId) -> Vec<ProposalOutput> {
         (from_index..std::cmp::min(self.last_proposal_id, from_index + limit))
             .filter_map(|id| {
-                self.proposals.get(&id).map(|proposal| ProposalOutput {
-                    id,
-                    proposal: ProposalBaseInformation::from(proposal),
+                self.proposals.get(&id).map(|versioned_proposal| {
+                    let proposal = Proposal::from(versioned_proposal.clone());
+                    let voted = if proposal.votes.get(&account_id).is_some() {
+                        proposal.votes.get(&account_id).unwrap().clone()
+                    } else {
+                        Vote {
+                            option: "_".to_string(),
+                            delegations: 0
+                        }
+                    };
+                    ProposalOutput {
+                        id,
+                        proposal: ProposalBaseInformation::from(versioned_proposal.clone()),
+                        user_select: voted,
+                    }
                 })
             })
             .collect()
     }
 
     // Get specific proposal.
-    pub fn get_proposal(&self, id: u64) -> ProposalOutput {
-        let proposal = self.proposals.get(&id).expect("ERR_NO_PROPOSAL");
-        ProposalOutput {
-            id,
-            proposal: ProposalBaseInformation::from(proposal),
-        }
+    pub fn get_proposal(&self, id: u64, account_id: AccountId) -> Option<ProposalOutput> {
+        let versioned_proposal = self.proposals.get(&id);
+        let output = if versioned_proposal.clone().is_some() {
+            let proposal: Proposal = Proposal::from(versioned_proposal.clone().unwrap());
+            let voted = if proposal.votes.get(&account_id).is_some() {
+                proposal.votes.get(&account_id).unwrap().clone()
+            } else {
+                Vote {
+                    option: "_".to_string(),
+                    delegations: 0
+                }
+            };
+            Some(ProposalOutput {
+                id,
+                proposal: ProposalBaseInformation::from(versioned_proposal.unwrap().clone()),
+                user_select: voted,
+            })
+        } else {
+            None   
+        };
+        output
     }
 
     pub fn get_proposal_donation(&self, id: u64, from_index: usize, limit: usize) -> Vec<ProposalDonateAsObject> {
@@ -198,17 +229,12 @@ impl Contract {
         response
     }
 
-    pub fn get_bounties(&self, from_index: u64, limit: u64, account_id: Option<&AccountId>) -> Vec<BountyOutput> {
+    pub fn get_bounties(&self, from_index: u64, limit: u64, account_id: AccountId) -> Vec<BountyOutput> {
         (from_index..std::cmp::min(self.last_bounty_id, from_index + limit))
             .filter_map(|id| {
                 self.bounties.get(&id).map(|versioned_bounty| {
-                    let claim_value = if account_id.is_some() {
-                        let bounty: Bounty = versioned_bounty.clone().into();
-                        let claim_value = bounty.claimer.get(account_id.unwrap()).unwrap_or(&0u128).clone();
-                        claim_value
-                    } else {
-                        0
-                    };
+                    let bounty: Bounty = versioned_bounty.clone().into();
+                    let claim_value = bounty.claimer.get(&account_id.to_string()).unwrap_or(&0u128).clone();
                     BountyOutput {
                         id,
                         claim_amount: claim_value,
@@ -220,10 +246,11 @@ impl Contract {
     }
 
     pub fn get_bounty(&self, id: u64, account_id: Option<AccountId>) -> Option<BountyOutput> {
-        let versioned_bounty = self.bounties.get(&id);
-        let output = if versioned_bounty.is_some() {
+        let versioned_bounty_option = self.bounties.get(&id);
+        let output = if versioned_bounty_option.is_some() {
+            let versioned_bounty_unwrapped = versioned_bounty_option.unwrap();
             let claim_value = if account_id.is_some() {
-                let bounty: Bounty = versioned_bounty.clone().unwrap().into();
+                let bounty: Bounty = versioned_bounty_unwrapped.clone().into();
                 let claim_value = bounty.claimer.get(&account_id.unwrap()).unwrap_or(&0u128).clone();
                 claim_value
             } else {
@@ -232,7 +259,7 @@ impl Contract {
             let bounty_output = BountyOutput {
                 id,
                 claim_amount: claim_value,
-                bounty: BountyBaseInformation::from(versioned_bounty.unwrap())
+                bounty: BountyBaseInformation::from(versioned_bounty_unwrapped)
             };
             Some(bounty_output)
         } else {

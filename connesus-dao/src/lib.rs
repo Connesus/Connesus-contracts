@@ -47,7 +47,7 @@ pub struct Contract {
     pub locked_amount: Balance,
 
     // Vote staking contract id. That contract must have this account as owner.
-    pub token_account_id: OldAccountId,
+    pub token_account: OldAccountId,
     // Delegated  token total amount.
     pub total_delegation_amount: Balance,
     // Delegations per user.
@@ -73,7 +73,7 @@ impl Contract {
         let owner_id = env::predecessor_account_id();
         let this = Self {
             dao_metadata: metadata,
-            token_account_id: token_contract_id,
+            token_account: token_contract_id,
             total_delegation_amount: 0,
             delegations: LookupMap::new(StorageKeys::Delegations),
             last_proposal_id: 0,
@@ -87,10 +87,7 @@ impl Contract {
         this
     }
 
-    // Should only be called by this contract on migration.
-    // This is NOOP implementation. KEEP IT if you haven't changed contract state.
-    // If you have changed state, you need to implement migration from old state (keep the old struct with different name to deserialize it first).
-    // After migrate goes live on MainNet, return this implementation for next updates.
+    
     #[init(ignore_state)]
     pub fn migrate() -> Self {
         assert_eq!(
@@ -99,28 +96,36 @@ impl Contract {
             "ERR_NOT_ALLOWED"
         );
         let this: Contract = env::state_read().expect("ERR_CONTRACT_IS_NOT_INITIALIZED");
-        this
+        Self {
+            dao_metadata: this.dao_metadata,
+            token_account: this.token_account,
+            total_delegation_amount: 0,
+            delegations: LookupMap::new(StorageKeys::Delegations),
+            last_proposal_id: 0,
+            proposals: LookupMap::new(StorageKeys::Proposals),
+            locked_amount: 0,
+            donations: LookupMap::new(StorageKeys::Donations),
+            owner_id: this.owner_id,
+            last_bounty_id: 0,
+            bounties: LookupMap::new(StorageKeys::Bounties),
+        }
     }
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
-#[cfg_attr(not(target_arch = "wasm32"), derive(Clone, Debug))]
 #[serde(crate = "near_sdk::serde")]
 pub enum TransferPurpose {
     Delegate,
     OpenDonate,
-    ProposalDonate,
-    CreateBounty,
+    ProposalDonate(u64),
+    CreateBounty(BountyInput),
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
-#[cfg_attr(not(target_arch = "wasm32"), derive(Clone, Debug))]
 #[serde(crate = "near_sdk::serde")]
 pub struct TransferArgs {
     pub delegate: AccountId,
-    pub proposal: Option<u64>,
-    pub transfer_type: TransferPurpose, // 1 for delegate, 2 for open donate, 3 for proposal donate,
-    pub bounty_input: Option<BountyInput>
+    pub purpose: TransferPurpose, // 1 for delegate, 2 for open donate, 3 for proposal donate,
 }
 
 /**
@@ -129,7 +134,7 @@ pub struct TransferArgs {
     in ft_on_transfer function
     The delegation of user will be added the amount of token transferred  to contract, delegate is the delegate property of DelegateArgs
 */
-// #[near_bindgen]
+#[near_bindgen]
 impl FungibleTokenReceiver for Contract {
     fn ft_on_transfer(
         &mut self,
@@ -137,21 +142,20 @@ impl FungibleTokenReceiver for Contract {
         amount: U128,
         msg: String,
     ) -> PromiseOrValue<U128> {
-        let TransferArgs { delegate, proposal, transfer_type, bounty_input } = near_sdk::serde_json::from_str(&msg).expect("Not valid DelegateArgs");
-        let token_account_id = self.token_account_id.clone();
-        match transfer_type {
+        let TransferArgs { delegate, purpose } = near_sdk::serde_json::from_str(&msg).expect("Not valid DelegateArgs");
+        let token_account = self.token_account.clone();
+        match purpose {
             TransferPurpose::Delegate => {
-                assert_account_id(&token_account_id);
+                assert_account_id(&token_account);
                 self.internal_delegate(&delegate, amount);
                 self.locked_amount += amount.0;
             },
             TransferPurpose::OpenDonate => {
-                assert_account_id(&token_account_id);
+                assert_account_id(&token_account);
                 self.open_donate(&sender_id.to_string(), amount);
             }, 
-            TransferPurpose::ProposalDonate => {
-                assert_account_id(&token_account_id);
-                let proposal_id = proposal.expect("PROPOSAL_ID_NOT_PROVIDED");
+            TransferPurpose::ProposalDonate(proposal_id) => {
+                assert_account_id(&token_account);
                 let mut proposal_obj: Proposal = self.proposals.get(&proposal_id).expect("ERR_NO_PROPOSAL").into();
                 match proposal_obj.kind {
                     ProposalKind::Donate => {
@@ -166,10 +170,9 @@ impl FungibleTokenReceiver for Contract {
                     
                 }
             },
-            TransferPurpose::CreateBounty => {
-                let bounty_unwrapped = bounty_input.expect("BOUNTY_INPUT_NOT_FOUND");
-                assert_account_id(&bounty_unwrapped.token);
-                self.create_bounty(bounty_unwrapped);
+            TransferPurpose::CreateBounty(bounty_input) => {
+                assert_account_id(&bounty_input.token);
+                self.create_bounty(bounty_input);
             }
         }
         PromiseOrValue::Value(U128(0))
