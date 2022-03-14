@@ -8,7 +8,7 @@ use near_sdk::{
     env, near_bindgen, AccountId, Balance, BorshStorageKey, Gas, PanicOnDefault, Promise,
 };
 
-const DAO_WASM_CODE: &[u8] = include_bytes!("../../out/connesus-dao.wasm");
+const DAO_WASM_CODE: &[u8] = include_bytes!("../../out/connecus-dao.wasm");
 
 const EXTRA_BYTES: usize = 10000;
 const GAS: Gas = 50_000_000_000_000;
@@ -30,11 +30,15 @@ enum StorageKey {
     StorageDeposits,
 }
 
+pub type OldAccountId = String;
+
+
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct DaoFactory {
     pub daos: UnorderedMap<AccountId, DaoArgs>,
     pub storage_deposits: LookupMap<AccountId, Balance>,
+    pub token_contract_id: ValidAccountId,
     pub storage_balance_cost: Balance,
 }
 
@@ -43,6 +47,7 @@ pub struct DaoFactory {
 pub struct DaoMetadata {
     // Name of the DAO.
     pub name: String,
+
     // Purpose of this DAO.
     pub purpose: String,
     // Generic metadata. Can be used by specific UI to store additional data.
@@ -52,8 +57,6 @@ pub struct DaoMetadata {
     pub symbol: String,
 
     pub facebook: Option<String>,
-
-    pub youtube: Option<String>,
 
     pub twitter: Option<String>,
 
@@ -65,14 +68,15 @@ pub struct DaoMetadata {
 #[derive(Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct DaoArgs {
-    dao_contract_id: AccountId,
+    token_contract_id: OldAccountId,
     metadata: DaoMetadata,
+    owner_id: AccountId
 }
 
 #[near_bindgen]
 impl DaoFactory {
     #[init]
-    pub fn new() -> Self {
+    pub fn new(token_contract_id: ValidAccountId) -> Self {
         let mut storage_deposits = LookupMap::new(StorageKey::StorageDeposits);
 
         let initial_storage_usage = env::storage_usage();
@@ -86,12 +90,37 @@ impl DaoFactory {
             daos: UnorderedMap::new(StorageKey::Daos),
             storage_deposits,
             storage_balance_cost,
+            token_contract_id: token_contract_id
+        }
+    }
+
+    #[init(ignore_state)]
+    pub fn migrate(token_contract_id: ValidAccountId) -> Self {
+        assert_eq!(
+            env::predecessor_account_id(),
+            env::current_account_id(),
+            "ERR_NOT_ALLOWED"
+        );
+        let this: Contract = env::state_read().expect("ERR_CONTRACT_IS_NOT_INITIALIZED");
+        let mut storage_deposits = LookupMap::new(StorageKey::StorageDeposits);
+        let initial_storage_usage = env::storage_usage();
+        let tmp_account_id = "a".repeat(64);
+        storage_deposits.insert(&tmp_account_id, &0);
+        let storage_balance_cost =
+            Balance::from(env::storage_usage() - initial_storage_usage) * STORAGE_PRICE_PER_BYTE;
+        storage_deposits.remove(&tmp_account_id);
+
+        Self {
+            daos: UnorderedMap::new(StorageKey::Daos),
+            storage_deposits,
+            storage_balance_cost,
+            token_contract_id: token_contract_id
         }
     }
 
     fn get_min_attached_balance(&self, args: &DaoArgs) -> u128 {
         ((DAO_WASM_CODE.len() + EXTRA_BYTES + args.try_to_vec().unwrap().len() * 2) as Balance
-            * STORAGE_PRICE_PER_BYTE)
+            * STORAGE_PRICE_PER_BYTE + 5)
             .into()
     }
 
@@ -122,10 +151,10 @@ impl DaoFactory {
         self.daos.len()
     }
 
-    pub fn get_daos(&self, from_index: u64, limit: u64) -> Vec<DaoArgs> {
+    pub fn get_daos(&self, from_index: u64, limit: u64) -> Vec<(u64, DaoArgs)> {
         let daos = self.daos.values_as_vector();
         (from_index..std::cmp::min(from_index + limit, daos.len()))
-            .filter_map(|index| daos.get(index))
+            .filter_map(|index| (index, daos.get(index)))
             .collect()
     }
 
@@ -144,6 +173,12 @@ impl DaoFactory {
         assert!(
             env::is_valid_account_id(dao_account_id.as_bytes()),
             "dao Account ID is invalid"
+        );
+
+        assert_eq!(
+            self.token_contract_id,
+            args.token_contract_id,
+            "dao Token ID is invalid"
         );
 
         let account_id = env::predecessor_account_id();
@@ -173,6 +208,8 @@ impl DaoFactory {
             .deploy_contract(DAO_WASM_CODE.to_vec())
             .function_call(b"new".to_vec(), serde_json::to_vec(&args).unwrap(), 0, GAS)
     }
+
+    
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

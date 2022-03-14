@@ -69,14 +69,22 @@ impl From<BountyInput> for Bounty {
 
 
 impl Bounty {
-    pub fn claim(&mut self, account_id: &AccountId) -> Balance {
+    pub fn claim(&mut self, account_id: &AccountId) -> Self {
         let expired_time = self.start_time.0 + self.duration.0;
         assert!(env::block_timestamp() < expired_time, "BOUNTY_DID_NOT_EXPIRED");
         let balance_option = self.claimer.remove(account_id);
-        assert!(self.claimer.remove(account_id).is_some(), "ERR_INVALID_CLAIMER");
+        assert!(balance_option.is_some(), "ERR_INVALID_CLAIMER");
         let balance_claimed = balance_option.unwrap_or(0);
         self.rest -= balance_claimed;
-        balance_claimed
+        ext_fungible_token::ft_transfer(
+            account_id.to_string(),
+            balance_claimed.into(),
+            None,
+            &self.token,
+            ONE_YOCTO_NEAR,
+            GAS_FOR_FT_TRANSFER
+        );
+        self.clone()
     }
 
     pub fn withdraw_the_rest(&mut self, receiver_id: &AccountId) {
@@ -97,17 +105,11 @@ impl Bounty {
 
 impl Contract {
     pub fn create_bounty(&mut self, bounty_input: BountyInput) -> u64 {
-        let account_id = env::predecessor_account_id();
-        assert_eq!(
-            account_id,
-            self.owner_id,
-            "ONLY_OWNER"
-        );
         let bounty = Bounty::from(bounty_input);
-        let id = self.last_proposal_id;
+        let id = self.last_bounty_id;
         self.bounties
             .insert(&id, &VersionedBounty::Default(bounty.into()));
-        self.last_proposal_id += 1;
+        self.last_bounty_id += 1;
         id
     }
 }
@@ -125,9 +127,10 @@ impl Contract {
         bounty.withdraw_the_rest(&account_id);
     }
 
-    pub fn claim_bounty(&self,  bounty_id: u64) -> Balance {
+    pub fn claim_bounty(&mut self,  bounty_id: u64) {
         let account_id = env::predecessor_account_id();
         let mut bounty: Bounty = self.bounties.get(&bounty_id).expect("BOUNTY_NOT_FOUND").into();
-        bounty.claim(&account_id)
+        let new_bounty = bounty.claim(&account_id);
+        self.bounties.insert(&bounty_id, &VersionedBounty::Default(new_bounty.into()));
     }
 }

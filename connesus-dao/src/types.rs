@@ -19,6 +19,7 @@ pub const GAS_FOR_FT_TRANSFER: Gas = 10_000_000_000_000;
 pub struct DaoMetadata {
     // Name of the DAO.
     pub name: String,
+
     // Purpose of this DAO.
     pub purpose: String,
     // Generic metadata. Can be used by specific UI to store additional data.
@@ -28,8 +29,6 @@ pub struct DaoMetadata {
     pub symbol: String,
 
     pub facebook: Option<String>,
-
-    pub youtube: Option<String>,
 
     pub twitter: Option<String>,
 

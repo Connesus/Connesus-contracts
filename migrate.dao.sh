@@ -9,5 +9,5 @@ cd ..
 near deploy \
     --wasmFile out/connecus-dao.wasm \
     --initFunction "migrate" \
-    --initArgs '{}' \
+    --initArgs '{"owner_id": "manhndev.testnet"}' \
     --accountId connecus-dao.manhndev.testnet

@@ -126,6 +126,14 @@ impl Contract {
         self.dao_metadata.clone()
     }
 
+    pub fn get_owner(&self) -> AccountId {
+        self.owner_id.clone()
+    }
+
+    pub fn get_donation_balance(&self, account_id: AccountId) -> Option<Balance> {
+        self.donations.get(&account_id)
+    }
+
 
     // Returns staking contract if available. Otherwise returns empty.
     pub fn token_account(self) -> String {
@@ -163,6 +171,10 @@ impl Contract {
 
     // Last proposal's id.
     pub fn get_last_proposal_id(&self) -> u64 {
+        self.last_proposal_id
+    }
+    
+    pub fn get_last_bounty_id(&self) -> u64 {
         self.last_proposal_id
     }
 

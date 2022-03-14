@@ -6,9 +6,9 @@ near deploy \
     --initArgs '{
         "metadata": {
             "spec": "ft-1.0.0",
-            "name": "ManhnvCoin",
-            "symbol": "MNC",
-            "icon": null,
+            "name": "Connecus",
+            "symbol": "CEUS",
+            "icon": "https://bafybeibplttj6muri65lq7vr6f55k3gdpsmet66l5gfycyuzmtubxy66te.ipfs.dweb.link/hearts.png",
             "reference": null,
             "reference_hash": null,
             "decimals": 1
@@ -16,4 +16,4 @@ near deploy \
         "owner_id": "manhndev.testnet",
         "total_supply": "1000000000000"
     }' \
-    --accountId connecus-token.manhndev.testnet
+    --accountId connecus.testnet

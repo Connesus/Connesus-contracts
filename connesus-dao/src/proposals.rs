@@ -73,7 +73,7 @@ pub struct Proposal {
 
     pub options: HashMap<String, VoteOption>,
 
-    // Submission time (for voting period).
+    // Submission time (for voting period). 
     pub submission_time: U64,
     pub duration: U64,
 
@@ -97,7 +97,7 @@ impl Proposal {
     }
 
     // add total delegations, add vote, add vote delegations
-    pub fn add_vote(&mut self, account_id: &AccountId, option_id: &String, vote_delegation: Balance, kind: &VoteKind) {
+    pub fn add_vote(&mut self, account_id: &AccountId, option_id: &String, vote_delegation: Balance, kind: &VoteKind) -> Self {
         assert!(self.options.get(option_id).is_some(), "INVALID_OPTION_ID");
         match kind {
             VoteKind::VoteByDelegation => {
@@ -123,6 +123,7 @@ impl Proposal {
                 self.option_delegations.insert(option_id.to_string(), option_new_delegation_amount);
             },
         }
+        self.clone()
     }
 
     // remove total delegations, remove vote, remove vote delegations
@@ -144,12 +145,12 @@ impl Proposal {
         }
     }
 
-    pub fn donate(&mut self, account_id: &AccountId, amount: Balance) -> (Balance, Balance, Balance) {
+    pub fn donate(&mut self, account_id: &AccountId, amount: Balance) -> Self {
         let prev_amount = self.donations.get(&account_id.to_string()).unwrap_or(&0).clone();
         let new_amount = 0 + amount;
         self.donations.insert(account_id.to_string(), new_amount);
         self.total_donations += amount;
-        (prev_amount, new_amount, amount)
+        self.clone()
     } 
 
     // Adds vote of the given user with given `amount` of weight. If user already voted, fails.
@@ -158,19 +159,19 @@ impl Proposal {
         account_id: &AccountId,
         option_id: &String,
         delegation_amount: Balance 
-    ) {
+    ) -> Self {
         let proposal_kind = self.kind.clone();
+        let mut new_proposal = self.clone();
         match proposal_kind {
             ProposalKind::Vote { vote_kind } => {
                 if self.votes.get(account_id).is_some() {
                     self.remove_vote(account_id, &vote_kind);
                 };
-                self.add_vote(account_id, option_id, delegation_amount, &vote_kind);
+                new_proposal = self.add_vote(account_id, option_id, delegation_amount, &vote_kind);
             },
-            ProposalKind::Donate => {
-                assert!(false, "Vote is not available for this proposal");
-            },
+            _ => unreachable!(),
         };
+        new_proposal
     }
 
     pub fn update_status(&mut self, status: ProposalStatus) {
@@ -236,6 +237,11 @@ impl Contract {
     // Add proposal to this DAO.
     pub fn add_proposal(&mut self, proposal_input: ProposalInput) -> u64 {
 
+        assert_eq!(
+            self.owner_id, 
+            env::predecessor_account_id(),
+            "ONLY_OWNER"
+        );
         // 1. Validate proposal.
         let  proposal = Proposal::from(proposal_input);
 
@@ -250,7 +256,8 @@ impl Contract {
     pub fn act_proposal(&mut self, id: u64, action: Action) {
         let account_id = env::predecessor_account_id();
         let mut proposal: Proposal = self.proposals.get(&id).expect("ERR_NO_PROPOSAL").into();
-        let user_delegate = self.delegations.get(&account_id).expect("ERR_NO_DELEGATION");
+        let user_delegate = self.delegations.get(&account_id).expect("USER_NOT_REGISTERED");
+        assert!(user_delegate > 0, "USER_ZERO_DELEGATION");
         {
             let proposal_end_time_stamp = proposal.submission_time.0 + proposal.duration.0;
             let current_block_timestamp = env::block_timestamp();
@@ -260,7 +267,8 @@ impl Contract {
             Action::Vote { option_id } => {
                 match &proposal.clone().kind {
                     ProposalKind::Vote { vote_kind } => {
-                        proposal.add_vote(&account_id, &option_id, user_delegate, &vote_kind);
+                        let new_proposal = proposal.update_votes(&account_id, &option_id, user_delegate);
+                        self.proposals.insert(&id , &VersionedProposal::Default(new_proposal.into()));
                     },
                     _ => unreachable!()
                 }
